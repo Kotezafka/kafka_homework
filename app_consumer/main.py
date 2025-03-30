@@ -3,17 +3,26 @@ import psycopg2
 from psycopg2 import sql
 import json
 from datetime import datetime
+from contextlib import asynccontextmanager
+import asyncio
+from fastapi import FastAPI
+import threading
 
-
+# Конфигурация
 KAFKA_BROKER = 'localhost:29092'
 KAFKA_TOPIC = 'errors'
-
+CONSUMER_GROUP_ID = 'error_consumers'  # Добавлен group_id
 
 PG_HOST = 'localhost'
 PG_DATABASE = 'postgres_db'
 PG_PORT = 5429
 PG_USER = 'postgres_user'
 PG_PASSWORD = 'postgres_password'
+
+# Глобальные переменные для ресурсов
+consumer = None
+pg_conn = None
+consumer_task = None
 
 
 def create_table_if_not_exists(conn):
@@ -46,8 +55,10 @@ def insert_error(conn, error_data):
         conn.commit()
 
 
-def consume_errors():
-    conn = psycopg2.connect(
+async def consume_errors():
+    global pg_conn, consumer
+
+    pg_conn = psycopg2.connect(
         host=PG_HOST,
         database=PG_DATABASE,
         user=PG_USER,
@@ -55,13 +66,16 @@ def consume_errors():
         port=PG_PORT
     )
 
-    create_table_if_not_exists(conn)
+    create_table_if_not_exists(pg_conn)
 
     consumer = KafkaConsumer(
         KAFKA_TOPIC,
         bootstrap_servers=KAFKA_BROKER,
+        group_id=CONSUMER_GROUP_ID,  # Добавлен group_id
         auto_offset_reset='earliest',
-        value_deserializer=lambda x: json.loads(x.decode('utf-8')))
+        enable_auto_commit=False,  # Отключаем авто-коммит
+        value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+    )
 
     print(f"Consumer started. Listening to topic: {KAFKA_TOPIC}")
 
@@ -71,18 +85,35 @@ def consume_errors():
             print(f"Received error: {error_data}")
 
             try:
-                insert_error(conn, error_data)
+                insert_error(pg_conn, error_data)
+                consumer.commit()  # Теперь commit будет работать
                 print("Error saved to PostgreSQL")
             except Exception as e:
                 print(f"Failed to save error to PostgreSQL: {e}")
-                conn.rollback()
-
-    except KeyboardInterrupt:
-        print("Consumer stopped by user")
+                pg_conn.rollback()
+    except Exception as e:
+        print(f"Consumer error: {e}")
     finally:
-        consumer.close()
-        conn.close()
+        if consumer:
+            consumer.close()
+        if pg_conn:
+            pg_conn.close()
+
+
+app = FastAPI()
+
+def run_async_task():
+    loop = asyncio.new_event_loop()  # Создаём новый цикл для потока
+    asyncio.set_event_loop(loop)     # Устанавливаем его
+    loop.run_until_complete(consume_errors())  # Запускаем асинхронную задачу
+
+@app.post("/upload_errors")
+async def root():
+    thread = threading.Thread(target=run_async_task)
+    thread.start()
+    return {"message": "Консьюмер успешно запущен"}
 
 
 if __name__ == "__main__":
-    consume_errors()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8002)
