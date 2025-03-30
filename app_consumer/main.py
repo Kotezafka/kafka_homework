@@ -1,17 +1,19 @@
-from kafka import KafkaConsumer
-import psycopg2
-from psycopg2 import sql
-import json
-from datetime import datetime
-from contextlib import asynccontextmanager
 import asyncio
-from fastapi import FastAPI
+import json
 import threading
+from contextlib import asynccontextmanager
+from datetime import datetime
 
-# Конфигурация
+import psycopg2
+from fastapi import FastAPI
+from kafka import KafkaConsumer
+from psycopg2 import sql
+
+
+
 KAFKA_BROKER = 'localhost:29092'
 KAFKA_TOPIC = 'errors'
-CONSUMER_GROUP_ID = 'error_consumers'  # Добавлен group_id
+CONSUMER_GROUP_ID = 'error_consumers'
 
 PG_HOST = 'localhost'
 PG_DATABASE = 'postgres_db'
@@ -19,7 +21,6 @@ PG_PORT = 5429
 PG_USER = 'postgres_user'
 PG_PASSWORD = 'postgres_password'
 
-# Глобальные переменные для ресурсов
 consumer = None
 pg_conn = None
 consumer_task = None
@@ -71,9 +72,9 @@ async def consume_errors():
     consumer = KafkaConsumer(
         KAFKA_TOPIC,
         bootstrap_servers=KAFKA_BROKER,
-        group_id=CONSUMER_GROUP_ID,  # Добавлен group_id
+        group_id=CONSUMER_GROUP_ID,
         auto_offset_reset='earliest',
-        enable_auto_commit=False,  # Отключаем авто-коммит
+        enable_auto_commit=False,
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
 
@@ -86,7 +87,7 @@ async def consume_errors():
 
             try:
                 insert_error(pg_conn, error_data)
-                consumer.commit()  # Теперь commit будет работать
+                consumer.commit()
                 print("Error saved to PostgreSQL")
             except Exception as e:
                 print(f"Failed to save error to PostgreSQL: {e}")
@@ -103,9 +104,9 @@ async def consume_errors():
 app = FastAPI()
 
 def run_async_task():
-    loop = asyncio.new_event_loop()  # Создаём новый цикл для потока
-    asyncio.set_event_loop(loop)     # Устанавливаем его
-    loop.run_until_complete(consume_errors())  # Запускаем асинхронную задачу
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(consume_errors())
 
 @app.post("/upload_errors")
 async def root():

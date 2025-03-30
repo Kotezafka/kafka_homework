@@ -1,10 +1,10 @@
-from fastapi import FastAPI, HTTPException, Request
-
-from kafka import KafkaProducer
-from pydantic import BaseModel
+import json
 from typing import Optional
 
-import json
+from fastapi import FastAPI, HTTPException, Request
+from kafka import KafkaProducer
+from pydantic import BaseModel
+
 
 app = FastAPI(
     title="Пример API",
